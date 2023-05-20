@@ -15,7 +15,7 @@
 #include <termios.h>
 #include <signal.h>
 #endif
-
+static RzLine I;
 static char *rz_line_nullstr = "";
 static const char word_break_characters[] = "\t\n ~`!@#$%^&*()-_=+[]{}\\|;:\"'<>,./";
 
@@ -1817,13 +1817,14 @@ RZ_API const char *rz_line_readline_cb(RzLineReadCallback cb, void *user) {
 				backward_kill_word(MINOR_BREAK);
 				break;
 			case -1: // escape key, goto vi mode
-				if (I.enable_vi_mode) {
+				if (gcomp) {
+					gcomp = 0;
+				} else if (I.enable_vi_mode) {
 					if (I.hud) {
 						I.hud->vi = true;
 					}
 					__vi_mode(&enable_yank_pop);
-				};
-				if (I.sel_widget) {
+				} else if (I.sel_widget) {
 					selection_widget_erase();
 				}
 				break;

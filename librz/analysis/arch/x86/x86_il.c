@@ -1061,34 +1061,47 @@ static RzILOpBitVector *x86_bool_to_bv(RzILOpBool *b, unsigned int bits) {
 	return ITE(b, UN(bits, 1), UN(bits, 0));
 }
 
+/*
 struct x86_parity_helper_t {
 	RzILOpBool *val; ///< value of parity
-	RzILOpEffect *eff; ///< RzILOpEffect used to find the parity
+	RzILOpPure *eff; ///< RzILOpEffect used to find the parity
 };
+*/
 
 /**
  * \brief Find the parity of lower 8 bits of \p val
  *
  * \param val
  */
-static struct x86_parity_helper_t x86_il_get_parity(RZ_OWN RzILOpPure *val) {
+static RzILOpPure* x86_il_get_parity(RZ_OWN RzILOpPure *val) {
 	// assumed that val is an 8-bit wide value
+        /*
 	RzILOpEffect *setvar = SETL("_popcnt", U8(0));
 	setvar = SEQ2(setvar, SETL("_val", val));
+        */
 
 	/* We can stop shifting the "_val" once it is zero,
 	since the value of "_popcnt" wouldn't change any further */
+        /*
 	RzILOpBool *condition = NON_ZERO(VARL("_val"));
 
 	RzILOpEffect *popcnt = SETL("_popcnt", ADD(VARL("_popcnt"), x86_bool_to_bv(LSB(VARL("_val")), 8)));
 	popcnt = SEQ2(popcnt, SETL("_val", SHIFTR0(VARL("_val"), U8(1))));
 
 	RzILOpEffect *repeat_eff = REPEAT(condition, popcnt);
+        */
+        RzILOpPure *accumulate = LET("__val",val,
+            LET("_c4",LOGXOR(VARLP("__val"),SHIFTR0(VARLP("__val"),U8(4))), 
+            LET("_c2", LOGXOR(VARLP("_c4"),SHIFTR0(VARLP("_c4"), U8(2))),
+              LOGXOR(VARLP("_c2"),SHIFTR0(VARLP("_c2"), U8(1))))));
 
+        /*
 	struct x86_parity_helper_t ret = {
 		.val = IS_ZERO(MOD(VARL("_popcnt"), U8(2))),
 		.eff = SEQ2(setvar, repeat_eff)
 	};
+        */
+        RzILOpPure* ret = IS_ZERO(accumulate);
 
 	return ret;
 }
@@ -1097,13 +1110,13 @@ static struct x86_parity_helper_t x86_il_get_parity(RZ_OWN RzILOpPure *val) {
  * \brief Sets the value of PF, ZF, SF according to the \p result
  */
 static RzILOpEffect *x86_il_set_result_flags_bits(RZ_OWN RzILOpPure *result, int bits) {
-	RzILOpEffect *set = SETL("_result", result);
-	struct x86_parity_helper_t pf = x86_il_get_parity(UNSIGNED(8, VARL("_result")));
+  RzILOpEffect* set = SETL("_result",result);
+        RzILOpBool *pf = x86_il_get_parity(UNSIGNED(8, result));
 	RzILOpBool *zf = IS_ZERO(VARL("_result"));
 	RzILOpBool *sf = MSB(VARL("_result"));
 
-	return SEQ5(set, pf.eff,
-		SETG(EFLAGS(PF), pf.val),
+	return SEQ4(set,
+		SETG(EFLAGS(PF), pf),
 		SETG(EFLAGS(ZF), zf),
 		SETG(EFLAGS(SF), sf));
 }
