@@ -11,6 +11,8 @@
  */
 
 #include "x86_il.h"
+#include "rz_il/rz_il_opcodes.h"
+#include "sh/disassembler.h"
 #include <rz_il/rz_il_opbuilder_begin.h>
 
 #define X86_BIT(x)  UN(1, x)
@@ -1073,35 +1075,14 @@ struct x86_parity_helper_t {
  *
  * \param val
  */
-static RzILOpPure* x86_il_get_parity(RZ_OWN RzILOpPure *val) {
+static RzILOpPure *x86_il_get_parity(RZ_OWN RzILOpPure *val) {
 	// assumed that val is an 8-bit wide value
-        /*
-	RzILOpEffect *setvar = SETL("_popcnt", U8(0));
-	setvar = SEQ2(setvar, SETL("_val", val));
-        */
-
-	/* We can stop shifting the "_val" once it is zero,
-	since the value of "_popcnt" wouldn't change any further */
-        /*
-	RzILOpBool *condition = NON_ZERO(VARL("_val"));
-
-	RzILOpEffect *popcnt = SETL("_popcnt", ADD(VARL("_popcnt"), x86_bool_to_bv(LSB(VARL("_val")), 8)));
-	popcnt = SEQ2(popcnt, SETL("_val", SHIFTR0(VARL("_val"), U8(1))));
-
-	RzILOpEffect *repeat_eff = REPEAT(condition, popcnt);
-        */
-        RzILOpPure *accumulate = LET("__val",val,
-            LET("_c4",LOGXOR(VARLP("__val"),SHIFTR0(VARLP("__val"),U8(4))), 
-            LET("_c2", LOGXOR(VARLP("_c4"),SHIFTR0(VARLP("_c4"), U8(2))),
-              LOGXOR(VARLP("_c2"),SHIFTR0(VARLP("_c2"), U8(1))))));
-
-        /*
-	struct x86_parity_helper_t ret = {
-		.val = IS_ZERO(MOD(VARL("_popcnt"), U8(2))),
-		.eff = SEQ2(setvar, repeat_eff)
-	};
-        */
-        RzILOpPure* ret = IS_ZERO(accumulate);
+	// see bap/plugins/x86/x86_lifter.ml:compute_pf (line:215)
+	RzILOpPure *accumulate = LET("_val", val,
+		LET("_c4", LOGXOR(VARLP("_val"), SHIFTR0(VARLP("_val"), U8(4))),
+			LET("_c2", LOGXOR(VARLP("_c4"), SHIFTR0(VARLP("_c4"), U8(2))),
+				LOGXOR(VARLP("_c2"), SHIFTR0(VARLP("_c2"), U8(1))))));
+	RzILOpPure *ret = INV(LSB(accumulate));
 
 	return ret;
 }
@@ -1110,8 +1091,8 @@ static RzILOpPure* x86_il_get_parity(RZ_OWN RzILOpPure *val) {
  * \brief Sets the value of PF, ZF, SF according to the \p result
  */
 static RzILOpEffect *x86_il_set_result_flags_bits(RZ_OWN RzILOpPure *result, int bits) {
-  RzILOpEffect* set = SETL("_result",result);
-        RzILOpBool *pf = x86_il_get_parity(UNSIGNED(8, result));
+	RzILOpEffect *set = SETL("_result", result);
+	RzILOpBool *pf = x86_il_get_parity(UNSIGNED(8, VARL("_result")));
 	RzILOpBool *zf = IS_ZERO(VARL("_result"));
 	RzILOpBool *sf = MSB(VARL("_result"));
 
@@ -2801,8 +2782,6 @@ IL_LIFTER(call) {
 	 * Implementing it accurately will require exceptions, task switching,
 	 * shadow stack, CPU internal flags, segmentation support
 	 * Just pushing the current program counter is a good approcimation for now
-	 * shadow stack, CPU internal flags, segmentation support
-	 * Just pushing the current program counter is a good approcimation for now
 	 * We also need to push the code segment register in case 16 and 32 bit modes.
 	 */
 
@@ -2902,28 +2881,29 @@ IL_LIFTER(pushal) {
 #define RCX_MACRO() \
 	unsigned int size = ins->structure->operands[0].size; \
 	RzILOpEffect *dest = SETL("_dest", x86_il_get_op(0)); \
-	RzILOpEffect *temp_count = NULL, *cnt_masked = NULL; \
-	ut8 tmp_count_size = 0; \
+	RzILOpEffect *count = NULL; \
+	ut8 count_size = 0; \
+	unsigned int max_count = 0; \
 	switch (size) { \
 	case 1: \
-		temp_count = SETL("_tmp_cnt", MOD(UNSIGNED(5, x86_il_get_op(1)), UN(5, 9))); \
-		cnt_masked = SETL("_cnt_mask", UNSIGNED(5, x86_il_get_op(1))); \
-		tmp_count_size = 5; \
+		max_count = 9; \
+		count = SETL("_cnt", MOD(UNSIGNED(5, x86_il_get_op(1)), UN(5, max_count))); \
+		count_size = 5; \
 		break; \
 	case 2: \
-		temp_count = SETL("_tmp_cnt", MOD(UNSIGNED(5, x86_il_get_op(1)), UN(5, 17))); \
-		cnt_masked = SETL("_cnt_mask", UNSIGNED(5, x86_il_get_op(1))); \
-		tmp_count_size = 5; \
+		max_count = 17; \
+		count = SETL("_cnt", MOD(UNSIGNED(5, x86_il_get_op(1)), UN(5, max_count))); \
+		count_size = 5; \
 		break; \
 	case 4: \
-		temp_count = SETL("_tmp_cnt", UNSIGNED(5, x86_il_get_op(1))); \
-		cnt_masked = SETL("_cnt_mask", UNSIGNED(5, x86_il_get_op(1))); \
-		tmp_count_size = 5; \
+		max_count = 33; \
+		count = SETL("_cnt", UNSIGNED(5, x86_il_get_op(1))); \
+		count_size = 5; \
 		break; \
 	case 8: \
-		temp_count = SETL("_tmp_cnt", UNSIGNED(6, x86_il_get_op(1))); \
-		cnt_masked = SETL("_cnt_mask", UNSIGNED(6, x86_il_get_op(1))); \
-		tmp_count_size = 6; \
+		max_count = 65; \
+		count = SETL("_cnt", UNSIGNED(6, x86_il_get_op(1))); \
+		count_size = 6; \
 		break; \
 	default: \
 		rz_warn_if_reached(); \
@@ -2937,19 +2917,21 @@ IL_LIFTER(pushal) {
 IL_LIFTER(rcl) {
 	RCX_MACRO();
 
-	RzILOpBool *cond = NON_ZERO(VARL("_tmp_cnt"));
-	RzILOpEffect *repeat = SETL("_tmp_cf", MSB(VARL("_dest")));
-	repeat = SEQ2(repeat, SETL("_dest", ADD(SHIFTL0(VARL("_dest"), U8(1)), x86_bool_to_bv(VARG(EFLAGS(CF)), BITS_PER_BYTE * size))));
-	repeat = SEQ2(repeat, SETG(EFLAGS(CF), VARL("_tmp_cf")));
-	repeat = SEQ2(repeat, SETL("_tmp_cnt", SUB(VARL("_tmp_cnt"), UN(tmp_count_size, 1))));
+	RzILOpPure *result = LET("_c_dest", APPEND(VARG(EFLAGS(CF)), VARL("_dest")),
+		CAST(size * BITS_PER_BYTE, IL_FALSE,
+			LOGOR(SHIFTL0(VARLP("_c_dest"), VARL("_cnt")),
+				SHIFTR0(VARLP("_c_dest"),
+					SUB(UN(count_size, max_count), VARL("_cnt"))))));
 
-	RzILOpEffect *ret = SEQ4(dest, temp_count, cnt_masked, REPEAT(cond, repeat));
+	RzILOpBool *if_cond1 = EQ(VARL("_cnt"), UN(count_size, 1));
+	RzILOpEffect *true_eff1 = SETG(EFLAGS(OF), XOR(MSB(VARL("_dest")), MSB(SHIFTL0(VARL("_dest"), UN(count_size, 1)))));
 
-	RzILOpBool *if_cond = EQ(VARL("_cnt_mask"), UN(tmp_count_size, 1));
-	RzILOpEffect *true_eff = SETG(EFLAGS(OF), XOR(MSB(VARL("_dest")), VARG(EFLAGS(CF))));
-	RzILOpEffect *set_dest = x86_il_set_op(0, VARL("_dest"));
+	RzILOpBool *if_cond2 = NON_ZERO(VARL("_cnt"));
+	RzILOpEffect *true_eff2 = SETG(EFLAGS(CF), MSB(SHIFTL0(VARL("_dest"), SUB(VARL("_cnt"), UN(count_size, 1)))));
 
-	return SEQ3(ret, BRANCH(if_cond, true_eff, NULL), set_dest);
+	RzILOpEffect *set_dest = x86_il_set_op(0, result);
+	RzILOpEffect *ret = SEQ5(dest, count, BRANCH(if_cond1, true_eff1, NULL), BRANCH(if_cond2, true_eff2, NULL), set_dest);
+	return ret;
 }
 
 /**
@@ -2960,17 +2942,20 @@ IL_LIFTER(rcl) {
 IL_LIFTER(rcr) {
 	RCX_MACRO();
 
-	RzILOpBool *if_cond = EQ(VARL("_cnt_mask"), UN(tmp_count_size, 1));
-	RzILOpEffect *true_eff = SETG(EFLAGS(OF), XOR(MSB(VARL("_dest")), VARG(EFLAGS(CF))));
+	RzILOpPure *result = LET("_c_dest", APPEND(VARG(EFLAGS(CF)), VARL("_dest")),
+		CAST(size * BITS_PER_BYTE, IL_FALSE,
+			LOGOR(SHIFTR0(VARLP("_c_dest"), VARL("_cnt")),
+				SHIFTL0(VARLP("_c_dest"),
+					SUB(UN(count_size, max_count), VARL("_cnt"))))));
 
-	RzILOpBool *cond = NON_ZERO(VARL("_tmp_cnt"));
-	RzILOpEffect *repeat = SETL("_tmp_cf", LSB(VARL("_dest")));
-	repeat = SEQ2(repeat, SETL("_dest", ADD(SHIFTR0(VARL("_dest"), U8(1)), SHIFTL0(x86_bool_to_bv(VARG(EFLAGS(CF)), BITS_PER_BYTE * size), U8(size)))));
-	repeat = SEQ2(repeat, SETG(EFLAGS(CF), VARL("_tmp_cf")));
-	repeat = SEQ2(repeat, SETL("_tmp_cnt", SUB(VARL("_tmp_cnt"), UN(tmp_count_size, 1))));
+	RzILOpBool *if_cond1 = EQ(VARL("_cnt"), UN(count_size, 1));
+	RzILOpEffect *true_eff1 = SETG(EFLAGS(OF), XOR(MSB(VARL("_dest")), VARG(EFLAGS(CF))));
 
-	RzILOpEffect *set_dest = x86_il_set_op(0, VARL("_dest"));
-	RzILOpEffect *ret = SEQ6(dest, temp_count, cnt_masked, BRANCH(if_cond, true_eff, NULL), REPEAT(cond, repeat), set_dest);
+	RzILOpBool *if_cond2 = NON_ZERO(VARL("_cnt"));
+	RzILOpEffect *true_eff2 = SETG(EFLAGS(CF), LSB(SHIFTR0(VARL("_dest"), VARL("_cnt"))));
+
+	RzILOpEffect *set_dest = x86_il_set_op(0, result);
+	RzILOpEffect *ret = SEQ5(dest, count, BRANCH(if_cond1, true_eff1, NULL), BRANCH(if_cond2, true_eff2, NULL), set_dest);
 
 	return ret;
 }
@@ -2978,18 +2963,16 @@ IL_LIFTER(rcr) {
 #undef RCX_MACRO
 
 #define ROX_MACRO() \
-	unsigned int size = ins->structure->operands[0].size; \
+	unsigned int size = ins->structure->operands[0].size * BITS_PER_BYTE; \
 	unsigned int cnt_size = ins->structure->operands[1].size * BITS_PER_BYTE; \
 	RzILOpEffect *dest = SETL("_dest", x86_il_get_op(0)); \
-	RzILOpEffect *count_mask = NULL; \
+	RzILOpPure *count_mask = NULL; \
 	if (size == 64) { \
-		count_mask = SETL("_cnt_mask", UN(ins->structure->operands[1].size * BITS_PER_BYTE, 0x3f)); \
+		count_mask = UN(cnt_size, 0x3f); \
 	} else { \
-		count_mask = SETL("_cnt_mask", UN(ins->structure->operands[1].size * BITS_PER_BYTE, 0x1f)); \
+		count_mask = UN(cnt_size, 0x1f); \
 	} \
-	RzILOpEffect *count = SETL("_cnt", x86_il_get_op(1)); \
-	RzILOpEffect *masked = SETL("_masked", LOGAND(VARL("_cnt_mask"), VARL("_cnt"))); \
-	RzILOpEffect *temp_count = SETL("_tmp_cnt", MOD(VARL("_masked"), UN(cnt_size, size)));
+	RzILOpEffect *cnt = SETL("_cnt", LOGAND(count_mask, x86_il_get_op(1)));
 
 /**
  * ROL
@@ -2999,19 +2982,18 @@ IL_LIFTER(rcr) {
 IL_LIFTER(rol) {
 	ROX_MACRO();
 
-	RzILOpBool *cond = NON_ZERO(VARL("_tmp_cnt"));
-	RzILOpEffect *repeat = SETL("_tmp_cf", MSB(VARL("_dest")));
-	repeat = SEQ2(repeat, SETL("_dest", ADD(SHIFTL0(VARL("_dest"), U8(1)), x86_bool_to_bv(VARL("_tmp_cf"), BITS_PER_BYTE * size))));
-	repeat = SEQ2(repeat, SETL("_tmp_cnt", SUB(VARL("_tmp_cnt"), UN(cnt_size, 1))));
+	RzILOpPure *result = LOGOR(
+		SHIFTL0(VARL("_dest"), VARL("_cnt")),
+		SHIFTR0(VARL("_dest"), SUB(UN(size, size), VARL("_cnt"))));
 
-	RzILOpBool *if_cond1 = NON_ZERO(VARL("_masked"));
+	RzILOpBool *if_cond1 = NON_ZERO(VARL("_cnt"));
 	RzILOpEffect *true_eff1 = SETG(EFLAGS(CF), LSB(VARL("_dest")));
 
-	RzILOpBool *if_cond2 = EQ(VARL("_masked"), UN(cnt_size, 1));
+	RzILOpBool *if_cond2 = EQ(VARL("_cnt"), UN(cnt_size, 1));
 	RzILOpEffect *true_eff2 = SETG(EFLAGS(OF), XOR(MSB(VARL("_dest")), VARG(EFLAGS(CF))));
 
-	RzILOpEffect *set_dest = x86_il_set_op(0, VARL("_dest"));
-	RzILOpEffect *ret = SEQ9(dest, count_mask, count, masked, temp_count, REPEAT(cond, repeat), BRANCH(if_cond1, true_eff1, NULL), BRANCH(if_cond2, true_eff2, NULL), set_dest);
+	RzILOpEffect *set_dest = x86_il_set_op(0, result);
+	RzILOpEffect *ret = SEQ5(dest, cnt, set_dest, BRANCH(if_cond1, true_eff1, NULL), BRANCH(if_cond2, true_eff2, NULL));
 
 	return ret;
 }
@@ -3024,20 +3006,18 @@ IL_LIFTER(rol) {
 IL_LIFTER(ror) {
 	ROX_MACRO();
 
-	RzILOpBool *cond = NON_ZERO(VARL("_tmp_cnt"));
-	RzILOpEffect *repeat = SETL("_tmp_cf", LSB(VARL("_dest")));
-	repeat = SEQ2(repeat, SETL("_dest", ADD(SHIFTR0(VARL("_dest"), U8(1)), SHIFTL0(x86_bool_to_bv(VARL("_tmp_cf"), BITS_PER_BYTE * size), U8(size)))));
-	repeat = SEQ2(repeat, SETL("_tmp_cnt", SUB(VARL("_tmp_cnt"), UN(cnt_size, 1))));
+	RzILOpPure *result = LOGOR(
+		SHIFTR0(VARL("_dest"), VARL("_cnt")),
+		SHIFTL0(VARL("_dest"), SUB(UN(size, size), VARL("_cnt"))));
 
-	RzILOpBool *if_cond1 = NON_ZERO(VARL("_masked"));
+	RzILOpBool *if_cond1 = NON_ZERO(VARL("_cnt"));
 	RzILOpEffect *true_eff1 = SETG(EFLAGS(CF), MSB(VARL("_dest")));
 
-	RzILOpBool *if_cond2 = EQ(VARL("_masked"), UN(cnt_size, 1));
+	RzILOpBool *if_cond2 = EQ(VARL("_cnt"), UN(cnt_size, 1));
 	RzILOpEffect *true_eff2 = SETG(EFLAGS(OF), XOR(MSB(VARL("_dest")), MSB(SHIFTL0(VARL("_dest"), U8(1)))));
 
-	RzILOpEffect *set_dest = x86_il_set_op(0, VARL("_dest"));
-	RzILOpEffect *ret = SEQ9(dest, count_mask, count, masked, temp_count, REPEAT(cond, repeat), BRANCH(if_cond1, true_eff1, NULL), BRANCH(if_cond2, true_eff2, NULL), set_dest);
-
+	RzILOpEffect *set_dest = x86_il_set_op(0, result);
+	RzILOpEffect *ret = SEQ5(dest, cnt, set_dest, BRANCH(if_cond1, true_eff1, NULL), BRANCH(if_cond2, true_eff2, NULL));
 	return ret;
 }
 
@@ -3104,11 +3084,8 @@ IL_LIFTER(sahf) {
 		count_mask = SETL("_cnt_mask", UN(count_size, 0x1f)); \
 	} \
 	RzILOpEffect *masked_count = SETL("_masked", LOGAND(VARL("_cnt"), VARL("_cnt_mask"))); \
-	RzILOpEffect *temp_count = SETL("_tmp_cnt", VARL("_masked")); \
 	RzILOpEffect *dest = SETL("_dest", x86_il_get_op(0)); \
-	RzILOpEffect *temp_dest = SETL("_tmp_dest", VARL("_dest")); \
-	RzILOpBool *while_cond = NON_ZERO(VARL("_tmp_cnt")); \
-	RzILOpEffect *ret = SEQ6(count, count_mask, masked_count, temp_count, dest, temp_dest);
+	RzILOpEffect *ret = SEQ4(count, count_mask, masked_count, dest);
 
 /**
  * SAL
@@ -3119,16 +3096,19 @@ IL_LIFTER(sahf) {
 IL_LIFTER(sal) {
 	SHIFT_MACRO();
 
-	RzILOpEffect *loop_body = SETG(EFLAGS(CF), MSB(VARL("_dest")));
-	loop_body = SEQ2(loop_body, SETL("_dest", SHIFTL0(VARL("_dest"), U8(1))));
-	loop_body = SEQ2(loop_body, SETL("_tmp_cnt", SUB(VARL("_tmp_cnt"), UN(count_size, 1))));
+	RzILOpPure *result = SHIFTL0(VARL("_dest"), VARL("_masked"));
 
-	ret = SEQ2(ret, REPEAT(while_cond, loop_body));
+	RzILOpEffect *set_cf = SETG(EFLAGS(CF), // set Carry flag
+		ITE(NON_ZERO(VARL("_masked")), // condition
+			/*then*/ MSB(SHIFTL0(VARL("_dest"), SUB(VARL("_masked"), UN(count_size, 1)))),
+			/*else*/ VARG(EFLAGS(CF)))); // else
 
-	RzILOpBool *cond = EQ(VARL("_masked"), UN(count_size, 1));
-	RzILOpEffect *set_overflow = SETG(EFLAGS(OF), XOR(MSB(VARL("_dest")), VARG(EFLAGS(CF))));
+	RzILOpEffect *set_of = SETG(EFLAGS(OF), // set Overflow flag
+		ITE(EQ(VARL("_masked"), UN(count_size, 1)), // condition
+			/*then*/ XOR(MSB(VARL("_dest")), VARG(EFLAGS(CF))),
+			/*else*/ VARG(EFLAGS(OF))));
 
-	return SEQ2(ret, BRANCH(cond, set_overflow, NULL));
+	return SEQ4(ret, result, set_cf, set_of);
 }
 
 /**
@@ -3139,18 +3119,20 @@ IL_LIFTER(sal) {
 IL_LIFTER(sar) {
 	SHIFT_MACRO();
 
-	RzILOpEffect *loop_body = SETG(EFLAGS(CF), LSB(VARL("_dest")));
-	loop_body = SEQ2(loop_body, SETL("_dest", SHIFTRA(VARL("_dest"), U8(1))));
-	loop_body = SEQ2(loop_body, SETL("_tmp_cnt", SUB(VARL("_tmp_cnt"), UN(count_size, 1))));
+	RzILOpPure *result = SHIFTRA(VARL("_dest"), VARL("_masked"));
 
-	ret = SEQ2(ret, REPEAT(while_cond, loop_body));
+	RzILOpEffect *set_cf = SETG(EFLAGS(CF), // set Carry flag
+		ITE(NON_ZERO(VARL("_masked")), // condition
+			/*then*/ LSB(SHIFTR0(VARL("_dest"), SUB(VARL("_masked"), UN(count_size, 1)))),
+			/*else*/ VARG(EFLAGS(CF)))); // else
 
-	RzILOpBool *cond = EQ(VARL("_masked"), UN(count_size, 1));
-	RzILOpEffect *set_overflow = SETG(EFLAGS(OF), IL_FALSE);
+	RzILOpEffect *set_of = SETG(EFLAGS(OF), // set Overflow flag
+		ITE(EQ(VARL("_masked"), UN(count_size, 1)), // condition
+			/*then*/ IL_FALSE,
+			/*else*/ VARG(EFLAGS(OF))));
 
-	return SEQ2(ret, BRANCH(cond, set_overflow, NULL));
+	return SEQ4(ret, result, set_cf, set_of);
 }
-
 /**
  * SHL
  * Shift left (unsigned shift left)
@@ -3160,36 +3142,42 @@ IL_LIFTER(sar) {
 IL_LIFTER(shl) {
 	SHIFT_MACRO();
 
-	RzILOpEffect *loop_body = SETG(EFLAGS(CF), MSB(VARL("_dest")));
-	loop_body = SEQ2(loop_body, SETL("_dest", SHIFTL0(VARL("_dest"), U8(1))));
-	loop_body = SEQ2(loop_body, SETL("_tmp_cnt", SUB(VARL("_tmp_cnt"), UN(count_size, 1))));
+	RzILOpPure *result = SHIFTL0(VARL("_dest"), VARL("_masked"));
 
-	ret = SEQ2(ret, REPEAT(while_cond, loop_body));
+	RzILOpEffect *set_cf = SETG(EFLAGS(CF), // set Carry flag
+		ITE(NON_ZERO(VARL("_masked")), // condition
+			/*then*/ MSB(SHIFTL0(VARL("_dest"), SUB(VARL("_masked"), UN(count_size, 1)))),
+			/*else*/ VARG(EFLAGS(CF)))); // else
 
-	RzILOpBool *cond = EQ(VARL("_masked"), UN(count_size, 1));
-	RzILOpEffect *set_overflow = SETG(EFLAGS(OF), XOR(MSB(VARL("_dest")), VARG(EFLAGS(CF))));
+	RzILOpEffect *set_of = SETG(EFLAGS(OF), // set Overflow flag
+		ITE(EQ(VARL("_masked"), UN(count_size, 1)), // condition
+			/*then*/ XOR(MSB(VARL("_dest")), VARG(EFLAGS(CF))),
+			/*else*/ VARG(EFLAGS(OF))));
 
-	return SEQ2(ret, BRANCH(cond, set_overflow, NULL));
+	return SEQ4(ret, result, set_cf, set_of);
 }
 
 /**
  * SHR
- * Shift right (unsigned shift left)
+ * Shift right (unsigned shift right)
  * Encoding: M1, MC, MI
  */
 IL_LIFTER(shr) {
 	SHIFT_MACRO();
 
-	RzILOpEffect *loop_body = SETG(EFLAGS(CF), LSB(VARL("_dest")));
-	loop_body = SEQ2(loop_body, SETL("_dest", SHIFTR0(VARL("_dest"), U8(1))));
-	loop_body = SEQ2(loop_body, SETL("_tmp_cnt", SUB(VARL("_tmp_cnt"), UN(count_size, 1))));
+	RzILOpPure *result = SHIFTR0(VARL("_dest"), VARL("_masked"));
 
-	ret = SEQ2(ret, REPEAT(while_cond, loop_body));
+	RzILOpEffect *set_cf = SETG(EFLAGS(CF), // set Carry flag
+		ITE(NON_ZERO(VARL("_masked")), // condition
+			/*then*/ LSB(SHIFTR0(VARL("_dest"), SUB(VARL("_masked"), UN(count_size, 1)))),
+			/*else*/ VARG(EFLAGS(CF)))); // else
 
-	RzILOpBool *cond = EQ(VARL("_masked"), UN(count_size, 1));
-	RzILOpEffect *set_overflow = SETG(EFLAGS(OF), MSB(VARL("_tmp_dest")));
+	RzILOpEffect *set_of = SETG(EFLAGS(OF), // set Overflow flag
+		ITE(EQ(VARL("_masked"), UN(count_size, 1)), // condition
+			/*then*/ MSB(VARL("_dest")),
+			/*else*/ VARG(EFLAGS(OF))));
 
-	return SEQ2(ret, BRANCH(cond, set_overflow, NULL));
+	return SEQ4(ret, result, set_cf, set_of);
 }
 
 /**
