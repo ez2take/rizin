@@ -11,8 +11,6 @@
  */
 
 #include "x86_il.h"
-#include "rz_il/rz_il_opcodes.h"
-#include "sh/disassembler.h"
 #include <rz_il/rz_il_opbuilder_begin.h>
 
 #define X86_BIT(x)  UN(1, x)
@@ -2945,8 +2943,7 @@ IL_LIFTER(rcr) {
 	RzILOpPure *result = LET("_c_dest", APPEND(VARG(EFLAGS(CF)), VARL("_dest")),
 		CAST(size * BITS_PER_BYTE, IL_FALSE,
 			LOGOR(SHIFTR0(VARLP("_c_dest"), VARL("_cnt")),
-				SHIFTL0(VARLP("_c_dest"),
-					SUB(UN(count_size, max_count), VARL("_cnt"))))));
+				SHIFTL0(VARLP("_c_dest"), SUB(UN(count_size, max_count), VARL("_cnt"))))));
 
 	RzILOpBool *if_cond1 = EQ(VARL("_cnt"), UN(count_size, 1));
 	RzILOpEffect *true_eff1 = SETG(EFLAGS(OF), XOR(MSB(VARL("_dest")), VARG(EFLAGS(CF))));
@@ -3098,13 +3095,15 @@ IL_LIFTER(sal) {
 
 	RzILOpPure *result = SHIFTL0(VARL("_dest"), VARL("_masked"));
 
-	RzILOpEffect *set_cf = SETG(EFLAGS(CF), // set Carry flag
-		ITE(NON_ZERO(VARL("_masked")), // condition
+	// set Carry flag
+	RzILOpEffect *set_cf = SETG(EFLAGS(CF),
+		/*if*/ ITE(NON_ZERO(VARL("_masked")),
 			/*then*/ MSB(SHIFTL0(VARL("_dest"), SUB(VARL("_masked"), UN(count_size, 1)))),
 			/*else*/ VARG(EFLAGS(CF)))); // else
 
-	RzILOpEffect *set_of = SETG(EFLAGS(OF), // set Overflow flag
-		ITE(EQ(VARL("_masked"), UN(count_size, 1)), // condition
+	// set Overflow flag
+	RzILOpEffect *set_of = SETG(EFLAGS(OF),
+		/*if*/ ITE(EQ(VARL("_masked"), UN(count_size, 1)),
 			/*then*/ XOR(MSB(VARL("_dest")), VARG(EFLAGS(CF))),
 			/*else*/ VARG(EFLAGS(OF))));
 
@@ -3121,13 +3120,15 @@ IL_LIFTER(sar) {
 
 	RzILOpPure *result = SHIFTRA(VARL("_dest"), VARL("_masked"));
 
-	RzILOpEffect *set_cf = SETG(EFLAGS(CF), // set Carry flag
-		ITE(NON_ZERO(VARL("_masked")), // condition
+	// set Carry flag
+	RzILOpEffect *set_cf = SETG(EFLAGS(CF),
+		/*if*/ ITE(NON_ZERO(VARL("_masked")),
 			/*then*/ LSB(SHIFTR0(VARL("_dest"), SUB(VARL("_masked"), UN(count_size, 1)))),
 			/*else*/ VARG(EFLAGS(CF)))); // else
 
+	// set Overflow flag
 	RzILOpEffect *set_of = SETG(EFLAGS(OF), // set Overflow flag
-		ITE(EQ(VARL("_masked"), UN(count_size, 1)), // condition
+		/*if*/ ITE(EQ(VARL("_masked"), UN(count_size, 1)),
 			/*then*/ IL_FALSE,
 			/*else*/ VARG(EFLAGS(OF))));
 
