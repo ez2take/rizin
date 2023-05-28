@@ -21,6 +21,7 @@ typedef x86_insn X86InsMnem;
 typedef struct x86_il_instruction_t {
 	const X86Ins *structure;
 	X86InsMnem mnem;
+	ut16 size;
 } X86ILIns;
 
 RZ_IPI bool rz_x86_il_opcode(RZ_NONNULL RzAnalysis *analysis, RZ_NONNULL RzAnalysisOp *aop, ut64 pc, RZ_BORROW RZ_NONNULL const X86ILIns *ins);
