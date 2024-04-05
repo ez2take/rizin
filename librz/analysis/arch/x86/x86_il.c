@@ -3157,6 +3157,8 @@ IL_LIFTER(shl) {
 
 	RzILOpPure *result = SHIFTL0(VARL("_dest"), VARL("_masked"));
 
+        RzILOpEffect *set_dest = x86_il_set_op(0, result);
+
 	RzILOpEffect *set_cf = SETG(EFLAGS(CF), // set Carry flag
 		ITE(NON_ZERO(VARL("_masked")), // condition
 			/*then*/ MSB(SHIFTL0(VARL("_dest"), SUB(VARL("_masked"), UN(count_size, 1)))),
@@ -3167,7 +3169,7 @@ IL_LIFTER(shl) {
 			/*then*/ XOR(MSB(VARL("_dest")), VARG(EFLAGS(CF))),
 			/*else*/ VARG(EFLAGS(OF))));
 
-	return SEQ4(ret, result, set_cf, set_of);
+	return SEQ4(ret, set_dest, set_cf, set_of);
 }
 
 /**
@@ -3180,6 +3182,8 @@ IL_LIFTER(shr) {
 
 	RzILOpPure *result = SHIFTR0(VARL("_dest"), VARL("_masked"));
 
+        RzILOpEffect *set_dest = x86_il_set_op(0, result);
+
 	RzILOpEffect *set_cf = SETG(EFLAGS(CF), // set Carry flag
 		ITE(NON_ZERO(VARL("_masked")), // condition
 			/*then*/ LSB(SHIFTR0(VARL("_dest"), SUB(VARL("_masked"), UN(count_size, 1)))),
@@ -3190,7 +3194,7 @@ IL_LIFTER(shr) {
 			/*then*/ MSB(VARL("_dest")),
 			/*else*/ VARG(EFLAGS(OF))));
 
-	return SEQ4(ret, result, set_cf, set_of);
+	return SEQ4(ret, set_dest, set_cf, set_of);
 }
 
 /**
