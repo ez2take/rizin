@@ -5260,7 +5260,6 @@ static void RzAnalysisBytes_free_mod(void *x) {
 	ab->op = NULL;
 	ab->disasm = NULL;
 	ab->opcode = NULL;
-	ab->pseudo = NULL;
 	analysis_bytes_fini(ab);
 	memset(ab, 0, sizeof(RzAnalysisBytes));
 }
