@@ -49,6 +49,7 @@ RZ_API void rz_parse_free(RzParse *p) {
 			plugin->fini(p, p->user);
 		}
 	}
+	RZ_FREE(p->retleave_asm);
 	rz_list_free(p->parsers);
 	free(p);
 }
