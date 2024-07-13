@@ -1134,7 +1134,7 @@ RZ_API bool rz_table_query(RzTable *t, const char *q) {
 			}
 		}
 		if (!operation) {
-			RzList *list = rz_list_new();
+			RzList *list = rz_list_newf(free);
 			if (list) {
 				rz_list_append(list, strdup(columnName));
 				rz_table_columns(t, list);
